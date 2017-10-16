@@ -44,6 +44,8 @@ def index():
 RANDOM_WORD_API_PATH = 'http://setgetgo.com/randomword/get.php'
 WIKIPEDIA_API_PATH = 'https://en.wikipedia.org/w/api.php'
 JOKES_API_PATH = 'http://api.icndb.com/jokes/random'
+MICROSOFT_SPELL_CHECK_API_PATH = 'https://api.cognitive.microsoft.com/bing/v5.0/spellcheck'
+MISROSOFT_KEY = '46e7afda55eb4d26adf3a72c02b8e1c3'
 requested_words = {}
 
 
@@ -119,23 +121,38 @@ def get_joke():
     return jsonify({'joke': joke})
 
 
-@app.route('/api/v1.0/spell_check', methods=['GET'])
+@app.route('/api/v1.0/spell_check', methods=['POST'])
 @auth.login_required
-def get_spell_check():
-    if not request.args:
+def post_spell_check():
+    if not request.json:
         abort(400)
 
-    if 'string' not in request.args:
+    if 'text' not in request.json:
         abort(400)
 
-    string = request.args.get('string')
+    text = request.json.get('text')
+    params = {
+        'mode': 'proof',
+        'mkt': 'en-us'
+    }
+    headers = {'Ocp-Apim-Subscription-Key': MISROSOFT_KEY}
+    data = {'text': text}
 
-    return jsonify({'correct': spell_check(string)})
+    response = requests.post(MICROSOFT_SPELL_CHECK_API_PATH,
+                             data=data,
+                             params=params,
+                             headers=headers)
 
+    result = {'tokens': []}
+    for token in response.json().get('flaggedTokens', []):
+        token_local = {'token': token['token'],
+                       'offset': token['offset'],
+                       'suggestions': []}
+        for suggestion in token.get('suggestions'):
+            token_local['suggestions'].append({'suggestion': suggestion['suggestion']})
+        result['tokens'].append(token_local)
 
-def spell_check(string):
-    # TODO
-    return False
+    return jsonify(result)
 
 
 if __name__ == '__main__':
