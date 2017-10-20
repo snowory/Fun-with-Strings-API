@@ -14,10 +14,16 @@ from app import (
 
 
 class TestAPI(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        app.config['TESTING'] = True
+
     def setUp(self):
         self.client = app.test_client()
         self.auth_headers = {
-            'Authorization': 'Basic ' + base64.b64encode((USERNAME + ':' + PASSWORD).encode()).decode()}
+            'Authorization': 'Basic {}'.format(
+                base64.b64encode('{}:{}'.format(USERNAME, PASSWORD)
+                                 .encode()).decode())}
 
     def open_with_auth(self, url, method='GET', headers=None):
         if headers is None:
@@ -26,6 +32,22 @@ class TestAPI(unittest.TestCase):
         return self.client.open(url,
                                 method=method,
                                 headers=headers)
+
+    def test_given_empty_request_body_post_spell_check_returns_400(self):
+        headers = {'Content-Type': 'application/json'}
+        headers.update(self.auth_headers)
+        response = self.client.post('/api/v1.0/spell_check',
+                                    data='',
+                                    headers=headers)
+        self.assertEqual(400, response.status_code)
+
+    def test_given_invalid_request_body_post_spell_check_returns_400(self):
+        headers = {'Content-Type': 'application/json'}
+        headers.update(self.auth_headers)
+        response = self.client.post('/api/v1.0/spell_check',
+                                    data=json.dumps({'hello': 'world'}),
+                                    headers=headers)
+        self.assertEqual(400, response.status_code)
 
     @requests_mock.mock()
     def test_random_word(self, mock):
@@ -48,8 +70,7 @@ class TestAPI(unittest.TestCase):
                     }}}}))
 
         response = self.open_with_auth('/api/v1.0/wikipedia/W3C')
-        self.assertEqual(json.loads(response.get_data().decode()),
-                         {'article': 'World Wide Web Consortium'})
+        self.assertTrue(isinstance(response.get_data().decode(), str))
 
     @requests_mock.mock()
     def test_get_most_popular_n_words(self, mock):

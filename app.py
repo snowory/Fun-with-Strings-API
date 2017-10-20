@@ -1,12 +1,28 @@
+import optparse
 import requests
 from requests.utils import quote
-from flask import Flask, jsonify, abort
+from flask import Flask, jsonify
 from flask import make_response
 from flask import request
 from flask_httpauth import HTTPBasicAuth
 
 app = Flask(__name__)
 auth = HTTPBasicAuth()
+
+###############################
+# Configure the option parser
+###############################
+DEFAULT_HOST = '0.0.0.0'
+DEFAULT_PORT = 5000
+
+usage = 'usage: %prog [options]'
+parser = optparse.OptionParser(usage)
+parser.add_option('', '--host', dest='host', default=DEFAULT_HOST,
+                  help='Host.')
+parser.add_option('', '--port', dest='port', default=DEFAULT_PORT,
+                  help='Port')
+(options, args) = parser.parse_args()
+
 
 #########################
 # Authentication
@@ -38,6 +54,25 @@ def unauthorized():
 def index():
     return "Hello, %s!" % auth.username()
 
+
+#########################
+# Error page handlers
+#########################
+@app.errorhandler(ValueError)
+def handle_error(e):
+    return str(e), 400
+
+
+@app.errorhandler(404)
+def page_not_found(e):
+    return str(e), 404
+
+
+@app.errorhandler(500)
+def page_not_found(e):
+    return 'Something went terribly wrong: {}'.format(e)
+
+
 ##########################
 # Fun with string API
 ##########################
@@ -52,6 +87,7 @@ requested_words = {}
 @app.route('/api/v1.0/random_word', methods=['GET'])
 @auth.login_required
 def get_random_word():
+    """Get a random word via public API"""
     word = requests.get(RANDOM_WORD_API_PATH).text
     return jsonify({'word': word})
 
@@ -59,10 +95,8 @@ def get_random_word():
 @app.route('/api/v1.0/wikipedia/<word>', methods=['GET'])
 @auth.login_required
 def get_wiki_article_for_given_word(word):
-    if not word:
-        return abort(400)
-
-    # Put word into the dictionary of requested words
+    """Return content of Wikipedia article about given word"""
+    # Collect statistics of requested words
     if requested_words.get(word) is None:
         requested_words[word] = 0
     requested_words[word] += 1
@@ -81,12 +115,15 @@ def get_wiki_article_for_given_word(word):
         if word.lower() == page['title'].lower():
             article = response.json()['query']['pages'][page_id]['extract']
 
-    return jsonify({'article': article})
+    return article.encode()  # utf-8 encoding is used by default
 
 
 @app.route('/api/v1.0/most_popular_words/<int:number>', methods=['GET'])
 @auth.login_required
 def get_most_popular_n_words(number):
+    """Collect statistics for most popular words,
+    submitted to previous operation and return top n number,
+    where number is provided by user"""
     most_popular_words = sorted(requested_words.items(),
                                 key=lambda x: x[1],
                                 reverse=True)[:number]
@@ -103,6 +140,9 @@ def get_most_popular_n_words(number):
 @app.route('/api/v1.0/jokes', methods=['GET'])
 @auth.login_required
 def get_joke():
+    """Given a first and/or a last name as parameter,
+    return a random joke from external API.
+    if no name is provided, a Chuck Norris joke is returned"""
     first_name = request.args.get('first_name')
     last_name = request.args.get('last_name')
     if not (first_name or last_name):
@@ -124,11 +164,15 @@ def get_joke():
 @app.route('/api/v1.0/spell_check', methods=['POST'])
 @auth.login_required
 def post_spell_check():
+    """Perform a spell check on a given string
+    via calling Microsoft Bing spell checking API"""
     if not request.json:
-        abort(400)
+        raise ValueError('Empty request body')
 
     if 'text' not in request.json:
-        abort(400)
+        raise ValueError('Request body must be as following: {}'.format(
+            {'text': 'Read a boook'}
+        ))
 
     text = request.json.get('text')
     params = {
@@ -149,11 +193,15 @@ def post_spell_check():
                        'offset': token['offset'],
                        'suggestions': []}
         for suggestion in token.get('suggestions'):
-            token_local['suggestions'].append({'suggestion': suggestion['suggestion']})
+            token_local['suggestions'].append(
+                {'suggestion': suggestion['suggestion']})
         result['tokens'].append(token_local)
 
     return jsonify(result)
 
 
 if __name__ == '__main__':
-    app.run()
+    try:
+        app.run(host=options.host, port=options.port)
+    except Exception as e:
+        print('Server failed to start: {}'.format(e))
